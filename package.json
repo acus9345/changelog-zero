@@ -1,0 +1,63 @@
+{
+  "name": "changelog-zero",
+  "version": "0.1.0",
+  "description": "Changelog generator for Conventional Commits with zero dependencies. Groups commits since the last tag, picks the next version, links commits and issues, and updates CHANGELOG.md and package.json.",
+  "keywords": [
+    "changelog",
+    "conventional-commits",
+    "conventional-changelog",
+    "release",
+    "semver",
+    "version",
+    "bump",
+    "git",
+    "keep-a-changelog",
+    "cli"
+  ],
+  "homepage": "https://github.com/acus9345/changelog-zero#readme",
+  "bugs": {
+    "url": "https://github.com/acus9345/changelog-zero/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acus9345/changelog-zero.git"
+  },
+  "license": "MIT",
+  "author": "acus9345 <acus9345@gmail.com>",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "changelog-zero": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "prelint": "npm run build",
+    "lint": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test \"test/*.test.ts\"",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
