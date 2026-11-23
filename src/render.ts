@@ -37,11 +37,12 @@ export interface RenderedRelease {
 export function renderRelease(options: RenderOptions): RenderedRelease {
   const style = options.style ?? "conventional";
   const repo = options.repo?.replace(/\/+$/, "");
-  const links = options.links ?? repo !== undefined;
+  const links = repo !== undefined && (options.links ?? true);
   const prefix = options.tagPrefix ?? "v";
   const date = options.date ?? new Date().toISOString().slice(0, 10);
   const gitlab = repo?.includes("gitlab.com") === true;
-  const commitUrl = (hash: string) => `${repo}${gitlab ? "/-" : ""}/commit${repo?.includes("bitbucket.org") ? "s" : ""}/${hash}`;
+  const bitbucket = repo?.includes("bitbucket.org") === true;
+  const commitUrl = (hash: string) => `${repo}${gitlab ? "/-" : ""}/commit${bitbucket ? "s" : ""}/${hash}`;
   const issueUrl = (n: number) => `${repo}${gitlab ? "/-" : ""}/issues/${n}`;
 
   const entry = (c: Commit, text: string): string => {
@@ -65,18 +66,21 @@ export function renderRelease(options: RenderOptions): RenderedRelease {
     add(style === "conventional" ? "⚠ Breaking Changes" : "Changed", entry(c, style === "conventional" ? c.breaking! : `**Breaking:** ${c.breaking}`));
   }
   for (const c of options.commits) {
-    const section = SECTIONS.find((s) => c.type !== undefined && s.types.includes(c.type));
-    if (section === undefined) {
-      if (options.all) add("Other", entry(c, c.subject));
-      else continue;
-    } else if (section.hidden && !options.all) {
-      continue;
-    } else {
-      // In Keep a Changelog style, the breaking entry already describes this commit.
-      if (style === "keepachangelog" && c.breaking !== undefined) continue;
-      add(style === "conventional" ? section.title : section.keepTitle, entry(c, c.subject));
+    let inSection = false;
+    // In Keep a Changelog style, the breaking entry already describes this commit.
+    if (!(style === "keepachangelog" && c.breaking !== undefined)) {
+      const section = SECTIONS.find((s) => c.type !== undefined && s.types.includes(c.type));
+      if (section === undefined) {
+        if (options.all) {
+          add("Other", entry(c, c.subject));
+          inSection = true;
+        }
+      } else if (!section.hidden || options.all) {
+        add(style === "conventional" ? section.title : section.keepTitle, entry(c, c.subject));
+        inSection = true;
+      }
     }
-    shown++;
+    if (inSection || c.breaking !== undefined) shown++;
   }
 
   const order =
@@ -94,11 +98,17 @@ export function renderRelease(options: RenderOptions): RenderedRelease {
   let link: string | undefined;
   if (repo !== undefined) {
     const to = options.version === "Unreleased" ? "HEAD" : `${prefix}${options.version}`;
-    link = options.previousTag
-      ? `${bracket}: ${repo}/compare/${options.previousTag}...${to}`
-      : options.version === "Unreleased"
-        ? undefined
-        : `${bracket}: ${repo}/releases/tag/${to}`;
+    if (options.previousTag) {
+      link = bitbucket
+        ? `${bracket}: ${repo}/branches/compare/${to}%0D${options.previousTag}`
+        : `${bracket}: ${repo}${gitlab ? "/-" : ""}/compare/${options.previousTag}...${to}`;
+    } else if (options.version !== "Unreleased") {
+      link = bitbucket
+        ? `${bracket}: ${repo}/src/${to}`
+        : gitlab
+          ? `${bracket}: ${repo}/-/tags/${to}`
+          : `${bracket}: ${repo}/releases/tag/${to}`;
+    }
   }
   return { section, link, shown };
 }
@@ -134,8 +144,10 @@ export function insertRelease(changelog: string | undefined, release: RenderedRe
     after = lines.slice(firstRelease);
   }
   while (before.length > 0 && before.at(-1) === "") before.pop();
-  let result = `${before.join("\n")}\n\n${release.section.trimEnd()}\n\n${after.join("\n").replace(/^\n+/, "")}`;
-  result = result.replace(/\n{3,}/g, "\n\n");
+  const head = before.join("\n");
+  const tail = after.join("\n").replace(/^\n+/, "").trimEnd();
+  const parts = [head, release.section.trimEnd(), tail].filter((p) => p.length > 0);
+  let result = `${parts.join("\n\n")}\n`.replace(/\n{3,}/g, "\n\n");
 
   if (release.link !== undefined) {
     const label = release.link.slice(0, release.link.indexOf(":"));

@@ -176,7 +176,7 @@ function run(argv: string[]): number {
   } else if (release === "major" || release === "minor" || release === "patch") {
     version = bumpVersion(current, release as Bump);
   } else if (/^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(release)) {
-    version = values.release!.replace(/^v/, "");
+    version = values.release!.replace(/^v/i, "");
   } else {
     throw new UsageError(`--release must be auto, major, minor, patch, unreleased or a version like 1.2.3, not "${values.release}".`);
   }

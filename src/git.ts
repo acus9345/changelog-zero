@@ -28,7 +28,14 @@ export function git(args: readonly string[], cwd: string): string {
 
 /** Version tags (`v1.2.3`, or `1.2.3` with an empty prefix) reachable from `ref`, newest first. */
 export function versionTags(cwd: string, prefix = "v", ref = "HEAD"): string[] {
-  const out = git(["tag", "--merged", ref, "--sort=-v:refname", "--list", `${prefix}*`], cwd);
+  let out: string;
+  try {
+    out = git(["-c", "versionsort.suffix=-", "tag", "--merged", ref, "--sort=-v:refname", "--list", `${prefix}*`], cwd);
+  } catch (error) {
+    // A brand-new repository has no HEAD yet.
+    if (error instanceof ChangelogError && ref === "HEAD" && /malformed object name|not a valid object name|unknown revision/i.test(error.message)) return [];
+    throw error;
+  }
   const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\d+\\.\\d+\\.\\d+(?:[-+].*)?$`);
   return out.split(/\r?\n/).map((t) => t.trim()).filter((t) => pattern.test(t));
 }
@@ -47,7 +54,7 @@ export function getCommits(cwd: string, from: string | undefined, to = "HEAD"): 
     out = git(["log", "--no-merges", `--format=%H${SEP}%s${SEP}%b${SEP}%an${SEP}%aI${END}`, range, "--"], cwd);
   } catch (error) {
     // A brand-new repository has no HEAD yet.
-    if (error instanceof ChangelogError && /does not have any commits|bad default revision|unknown revision/i.test(error.message) && from === undefined) return [];
+    if (error instanceof ChangelogError && from === undefined && to === "HEAD" && /does not have any commits|bad (?:default )?revision|unknown revision/i.test(error.message)) return [];
     throw error;
   }
   return out
@@ -82,11 +89,12 @@ export function repoUrl(cwd: string): string | undefined {
 
 /** `git@github.com:o/r.git`, `git+https://github.com/o/r.git`, `github:o/r` → `https://github.com/o/r`. */
 export function normalizeRepoUrl(url: string): string | undefined {
-  const shorthand = /^(github|gitlab|bitbucket):([\w.-]+\/[\w.-]+)$/.exec(url) ?? /^([\w.-]+\/[\w.-]+)$/.exec(url);
+  const trimmed = url.trim();
+  const shorthand = /^(github|gitlab|bitbucket):([\w.-]+\/[\w.-]+)$/.exec(trimmed) ?? /^([\w.-]+\/[\w.-]+)$/.exec(trimmed);
   if (shorthand) {
     const host = shorthand.length === 3 ? `${shorthand[1]}.com` : "github.com";
     return `https://${host === "bitbucket.com" ? "bitbucket.org" : host}/${shorthand.at(-1)!.replace(/\.git$/, "")}`;
   }
-  const m = /^(?:git\+)?(?:https?:\/\/|ssh:\/\/)?(?:[^@/]+@)?(github\.com|gitlab\.com|bitbucket\.org)[:/]([^#?]+?)(?:\.git)?\/?$/.exec(url.trim());
+  const m = /^(?:git\+)?(?:https?:\/\/|ssh:\/\/)?(?:[^@/]+@)?(github\.com|gitlab\.com|bitbucket\.org)[:/]([^#?]+?)(?:\.git)?\/?$/.exec(trimmed);
   return m ? `https://${m[1]}/${m[2]}` : undefined;
 }

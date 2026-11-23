@@ -40,6 +40,7 @@ describe("versions", () => {
     assert.equal(nextVersion("1.4.2", [c("fix: a"), c("feat: b")]), "1.5.0");
     assert.equal(nextVersion("1.4.2", [c("feat!: c")]), "2.0.0");
     assert.equal(nextVersion("0.3.1", [c("feat!: c")]), "0.4.0");
+    assert.equal(nextVersion("v0.3.1", [c("feat!: c")]), "0.4.0");
     assert.equal(nextVersion("v2.0.0-beta.1", [c("docs: x")]), "2.0.1");
     assert.equal(bumpFor([], "1.0.0"), undefined);
   });
@@ -85,6 +86,39 @@ describe("renderRelease", () => {
     const r = renderRelease({ version: "2.0.0", date: "2026-10-18", commits, style: "keepachangelog", all: true });
     assert.match(r.section, /### Added\n\n- \*\*cli:\*\* add --json \(#7\) \(1111111\)\n\n### Changed\n\n- \*\*Breaking:\*\* use app\.config\.json instead of \.apprc \(3333333\)\n- typo \(4444444\)\n\n### Fixed\n\n- handle empty input \(2222222\)\n\n### Other\n\n- WIP \(5555555\)\n$/);
     assert.equal(r.link, undefined);
+    assert.equal(r.shown, 5);
+  });
+
+  it("counts breaking hidden/non-conventional commits and avoids duplicating them in keepachangelog", () => {
+    const hiddenBreaking = c("refactor!: drop Node 18", "", "6666666aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const r1 = renderRelease({ version: "2.0.0", date: "2026-10-18", commits: [hiddenBreaking] });
+    assert.equal(r1.shown, 1);
+    assert.match(r1.section, /### ⚠ Breaking Changes\n\n- drop Node 18 \(6666666\)/);
+
+    const plainBreaking = c("Drop legacy API", "BREAKING CHANGE: removed legacy API", "7777777aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const r2 = renderRelease({ version: "2.0.0", date: "2026-10-18", commits: [plainBreaking], style: "keepachangelog", all: true });
+    assert.equal(r2.shown, 1);
+    assert.match(r2.section, /### Changed\n\n- \*\*Breaking:\*\* removed legacy API \(7777777\)/);
+    assert.doesNotMatch(r2.section, /### Other/);
+  });
+
+  it("formats GitLab and Bitbucket links and ignores links: true without repo", () => {
+    const gl = renderRelease({ version: "1.1.0", date: "2026-10-18", commits: [commits[0]!], repo: "https://gitlab.com/me/app", previousTag: "v1.0.0" });
+    assert.match(gl.section, /https:\/\/gitlab\.com\/me\/app\/-\/issues\/7/);
+    assert.match(gl.section, /https:\/\/gitlab\.com\/me\/app\/-\/commit\/1111111/);
+    assert.equal(gl.link, "[1.1.0]: https://gitlab.com/me/app/-/compare/v1.0.0...v1.1.0");
+    const glFirst = renderRelease({ version: "1.0.0", date: "2026-10-18", commits: [commits[0]!], repo: "https://gitlab.com/me/app" });
+    assert.equal(glFirst.link, "[1.0.0]: https://gitlab.com/me/app/-/tags/v1.0.0");
+
+    const bb = renderRelease({ version: "1.1.0", date: "2026-10-18", commits: [commits[0]!], repo: "https://bitbucket.org/me/app", previousTag: "v1.0.0" });
+    assert.match(bb.section, /https:\/\/bitbucket\.org\/me\/app\/commits\/1111111/);
+    assert.equal(bb.link, "[1.1.0]: https://bitbucket.org/me/app/branches/compare/v1.1.0%0Dv1.0.0");
+    const bbFirst = renderRelease({ version: "1.0.0", date: "2026-10-18", commits: [commits[0]!], repo: "https://bitbucket.org/me/app" });
+    assert.equal(bbFirst.link, "[1.0.0]: https://bitbucket.org/me/app/src/v1.0.0");
+
+    const noRepo = renderRelease({ version: "1.0.0", date: "2026-10-18", commits: [commits[0]!], links: true });
+    assert.match(noRepo.section, /\(1111111\)$\n/m);
+    assert.doesNotMatch(noRepo.section, /undefined/);
   });
 
   it("inserts above the newest release and keeps link definitions together", () => {
@@ -95,12 +129,18 @@ describe("renderRelease", () => {
     assert.match(out, /\n\[1\.5\.0\]: https:\/\/github\.com\/me\/app\/compare\/v1\.4\.0\.\.\.v1\.5\.0\n\[1\.4\.0\]: /);
     assert.doesNotMatch(out, /Unreleased/);
     assert.match(insertRelease(undefined, r), /^# Changelog\n\nAll notable changes.*\n\n## \[1\.5\.0\]/);
+    const noLink = renderRelease({ version: "1.5.0", date: "2026-10-18", commits: [commits[0]!] });
+    assert.match(insertRelease(undefined, noLink), /\(1111111\)\n$/);
+    assert.doesNotMatch(insertRelease(undefined, noLink), /\n\n$/);
+    assert.match(insertRelease("## [1.4.0] - 2026-01-01\n\n- old\n", noLink), /^## \[1\.5\.0\]/);
   });
 
   it("normalizes repository URLs", () => {
-    for (const u of ["git+https://github.com/me/app.git", "git@github.com:me/app.git", "github:me/app", "me/app", "https://github.com/me/app/"]) {
+    for (const u of ["git+https://github.com/me/app.git", "git@github.com:me/app.git", "github:me/app", " github:me/app ", "me/app", "https://github.com/me/app/"]) {
       assert.equal(normalizeRepoUrl(u), "https://github.com/me/app", u);
     }
+    assert.equal(normalizeRepoUrl("gitlab:me/app"), "https://gitlab.com/me/app");
+    assert.equal(normalizeRepoUrl("bitbucket:me/app"), "https://bitbucket.org/me/app");
     assert.equal(normalizeRepoUrl("https://example.com/x.git"), undefined);
   });
 });
@@ -165,11 +205,42 @@ describe("cli", () => {
     const dir = repo();
     assert.match(cli(["-r", "major"], dir).stdout, /^## \[2\.0\.0\]/);
     assert.match(cli(["-r", "v3.1.4"], dir).stdout, /^## \[3\.1\.4\]/);
+    assert.match(cli(["-r", "V3.1.4"], dir).stdout, /^## \[3\.1\.4\]/);
     const bad = cli(["-r", "soon"], dir);
     assert.equal(bad.status, 2);
     assert.match(bad.stderr, /--release must be/);
     const nothing = cli(["--from", "HEAD"], dir);
     assert.equal(nothing.status, 1);
     assert.match(nothing.stderr, /nothing to release/);
+  });
+
+  it("handles an empty repository and sorts prerelease tags before stable releases", () => {
+    const empty = mkdtempSync(join(tmpdir(), "changelog-zero-empty-"));
+    dirs.push(empty);
+    const g = (...args: string[]) => execFileSync("git", args, { cwd: empty, encoding: "utf8" });
+    g("init", "-q", "-b", "main");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "Test");
+    g("config", "commit.gpgsign", "false");
+
+    const rEmpty = cli([], empty);
+    assert.equal(rEmpty.status, 1);
+    assert.match(rEmpty.stderr, /nothing to release/);
+    const rJson = cli(["--json"], empty);
+    assert.equal(rJson.status, 0, rJson.stderr);
+    assert.deepEqual(JSON.parse(rJson.stdout).commits, []);
+
+    g("commit", "-q", "--allow-empty", "-m", "feat: alpha");
+    g("tag", "v1.0.0-alpha.1");
+    g("commit", "-q", "--allow-empty", "-m", "fix: stabilize");
+    g("tag", "v1.0.0");
+    g("commit", "-q", "--allow-empty", "-m", "fix: post-release fix");
+
+    const rStable = cli(["--json"], empty);
+    assert.equal(rStable.status, 0, rStable.stderr);
+    const data = JSON.parse(rStable.stdout);
+    assert.equal(data.from, "v1.0.0");
+    assert.equal(data.next, "1.0.1");
+    assert.equal(data.commits.length, 1);
   });
 });

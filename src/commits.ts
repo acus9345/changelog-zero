@@ -83,7 +83,7 @@ export type Bump = "major" | "minor" | "patch";
  */
 export function bumpFor(commits: readonly Commit[], current: string): Bump | undefined {
   if (commits.length === 0) return undefined;
-  const preMajor = /^0\./.test(current);
+  const preMajor = /^v?0\./.test(current.trim());
   if (commits.some((c) => c.breaking !== undefined)) return preMajor ? "minor" : "major";
   if (commits.some((c) => c.type === "feat" || c.type === "feature")) return "minor";
   return "patch";
